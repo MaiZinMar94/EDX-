@@ -1,0 +1,422 @@
+---
+title: "Wine Capstone Project 2022"
+author: "Anaiz"
+date: "February 2022"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+**Introduction**
+
+The goal of this exercise is to create two predictive models for the wine data. 
+Firstly, a data analysis will be performed in order to see what type of data and prediction can be made. Secondly, predictive models will be created with the help of a train and test set. At last, the models will be evaluated and compared to each other.
+
+In order to reach the goal, machine learning algorithms are used.
+
+*1. Data Analysis*
+
+The data set for this exercise was downloaded from Kaggle and credit goes to: P. Cortez, A. Cerdeira, F. Almeida, T. Matos and J. Reis. 
+
+This data set includes a subset of wine quality parameters obtained only in red wine. There are different parameters included, like acidity, pH density and also a score for each sample. The goal of this data analysis is to investigate any possible correlations between the different parameters and in particularly in relationship with it's score. 
+
+  *1.1 Packages installation*
+
+Before the data analysis started, useful packages that could help with the analysis were installed (ex. ggplot2, dplyr,lubridate,validate,caret, etc..)
+```{r, include = FALSE}
+#Install useful packages that could help with the analysis
+
+packages <- c("ggplot2", "dplyr", "tidyr", "corrplot", "grid", "gridExtra", "Hmisc", "lattice", "readxl", "patchwork", "tidyverse", 
+              "scales","dslabs", "stringr","forcats","lubridate","validate","caret","data.table","ggridges", "randomForest")
+
+# Install packages not yet installed
+
+installed_packages <- packages %in% rownames(installed.packages())
+
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])}
+
+# Packages loading
+
+lapply(packages, library, character.only = TRUE)
+```
+
+  *1.2 Downloading of data set and first analysis*  
+
+The dataset was downloaded and imported to R studio.
+
+```{r, include = FALSE}
+wine <- read.csv("~/Desktop/wineQualityReds.csv")
+view(wine)
+```
+Once ready, a copy of wine data was created:
+
+```{r}
+wine1 <- wine
+```
+
+This step is not really needed, but I found it useful while doing the data analysis in case something did not work well. 
+
+The first analysis was to take a look at all the data and the class of each variable:
+```{r summary, echo=FALSE}
+summary(wine1)
+```
+```{r str, echo=FALSE}
+str(wine1)
+```
+
+The data set contains 13 variables and 1599 observations. The next step was to look if there were any NA present:
+
+```{r}
+anyNA(wine1)
+```
+
+What was observed is that the last variable is called quality. In order to make it clear that this corresponds to a grade, the name was changed to Score.
+
+```{r, include = FALSE}
+wine1 <- rename(wine1,  Score = quality)
+```
+
+*1.3 Data visualization and in depth analysis*
+
+In order to have an overview of each parameter versus the score, first the data format needed to be changed from wide to long.
+```{r, include = FALSE}
+wine1_long <- gather(wine1, analysis, results,fixed.acidity:alcohol, factor_key=TRUE)
+wine1_long %>% group_by(analysis)
+#Convert analysis and score into factor
+wine1_long$analysis <- factor(wine1_long$analysis, levels=unique(wine1_long$analysis))
+wine1_long$Score <- factor(wine1_long$Score, levels = c("3","4","5","6","7","8"))
+```
+
+Once this was performed, the first graph was achieved: 
+
+```{r graph1, echo=FALSE, fig.align = 'center'}
+p0 <- wine1_long %>% group_by(Score) %>% 
+  ggplot(aes(Score, results, color=Score))+
+  geom_point()
+
+p0 +  facet_wrap(~analysis, scales="free_y")
+```
+
+The results or this graph did not show a clear trend, therefore it was decided to create a boxplot:
+
+```{r graph2, echo=FALSE, fig.align = 'center'}
+p1 <- wine1_long %>% group_by(Score) %>% 
+  ggplot(aes(Score, results, fill=Score))+
+  geom_boxplot()
+
+p1 +  facet_wrap(~analysis, scales="free_y")
+```
+
+In this graph is clearer that there is a trend for some of the variables. We can see that volatile acidity decrease while the score increase. The inverse result is seen with citric acid and alcohol. We need to be careful with these interpretations as for some variables the variability between the quartals is quite high and for some variables (ex. chlorides) there are quite some outliers not contributing to the bowplot. Therefore, more investigation is needed. 
+
+Boxplot has it's limitation when it handles large data sets. It was decided to created a ridge plot in order to see if we might have a bimodal distribution for the variables:
+
+```{r graph3, echo=FALSE, fig.align = 'center'}
+p2 <- wine1_long %>% group_by(Score) %>%
+  ggplot(aes(results, Score, fill=Score)) + 
+  scale_x_continuous()+
+  geom_density_ridges()
+
+p2 +  facet_wrap(~analysis, scales="free_x")
+```
+
+We can see that for some variables a bimodal distribution is observed. This can be due to either the distribution that really is bimodal or that we are analysing a variable as one, without realizing that for example two or more different types of grapes were used to produce the wine and can have an influence on the variable itself. Unfortunately, with this data set we don't know the grapes of each wine. 
+
+To confirm if there is any correlation of variables with score, a correlation matrix was created.The significance level was set to 0.05.
+
+```{r, include = FALSE}
+wine1corr <- wine1
+wine1corr <- wine1corr[,-1]
+```
+
+```{r graph4, echo=FALSE, fig.align = 'center'}
+Mycorr = rcorr(as.matrix(wine1corr), type = "spearman")
+
+corrplot(corr =Mycorr$r,
+         p.mat = Mycorr$P,
+         order ="original",
+         sig.level =0.05,
+         insig ="blank",
+         diag = F,
+         type = "lower")
+```
+
+We can see that fixed acidity correlates positively with citric acid and density, while it correlates negatively with pH. As we are only investigating the correlations of the variables with score, no further analysis in between variables were made.
+
+For the correlations with score, it seems like the 3 variables having the most impact are alcohol, sulphates and volatile acidity. We see a positiv correlation between score and alcohol, score and sulphates and a negative correlation between score and volatile acidity. Meaning the higher the score, the higher the average alcohol and sulphates content and the lower the average volatile acidity.
+
+It was decided to investigate these 3 parameters a bit further:
+
+```{r graph5, echo=FALSE, fig.align = 'center'}
+p3 <- wine1 %>% group_by(Score) %>% 
+  summarise(mean_alc = mean(alcohol), count=n()) %>%
+  ggplot(aes(Score, mean_alc))+
+  geom_point()+
+  geom_smooth()+
+  labs(title="Average alcohol content per score",x="Score",y="Average of alcohol content")
+p3
+```
+```{r graph6, echo=FALSE, fig.align = 'center'}
+p4 <- wine1 %>% group_by(Score) %>% 
+  summarise(mean_vol = mean(volatile.acidity), count=n()) %>%
+  ggplot(aes(Score, mean_vol))+
+  geom_point()+
+  geom_smooth()+
+  labs(title="Average volatile acidity per score",x="Score",y="Average of volatile acidity")
+p4
+```
+```{r graph7, echo=FALSE, fig.align = 'center'}
+p5 <- wine1 %>% group_by(Score) %>% 
+  summarise(mean_sul = mean(sulphates), count=n()) %>%
+  ggplot(aes(Score, mean_sul))+
+  geom_point()+
+  geom_smooth()+
+  labs(title="Average sulphates content per score",x="Score",y="Average of sulphates content")
+p5
+```
+
+The graphs above confirm the observations seen in the correlation matrix. These parameters will be used to create one of our models. 
+
+*2. Modelling analysis and Results*
+
+In this section, two different models approach will be used. 
+The first model approach is the recommendation system (like in the movielens exercise from EDX Capstone course). For this model the variables used are alcohol, sulphates and volatile acidity to predict the score of a wine. 
+The second approach is the random forest model. 
+For both models, the RMSE will be reported.
+
+Please be aware, in the analysis "summarise" is written with "s" as with "z" the code did not work with my R and gave me an error each time I used it.
+
+Before starting any anaylsis, a train and test data set were created with 50% partition.
+
+```{r}
+set.seed(1, sample.kind = "Rounding")
+
+test_index <- createDataPartition(wine1$Score, times = 1, p = 0.5, list = FALSE)
+
+train <- wine1[test_index,]
+test <- wine1[-test_index,]
+
+test <- test %>% 
+  semi_join(train, by = "alcohol") %>%
+  semi_join(train, by = "volatile.acidity") %>%
+  semi_join(train, by = "sulphates")
+```
+
+*2.1 Recommendation System Model*
+
+First, the Residual Mean Squared Error function was defined
+```{r}
+RMSE <- function(true_prediction, predicted_prediction){
+  sqrt(mean((true_prediction - predicted_prediction)^2))}
+```
+
+The first model used in this approach was to predict the score of the wine independent of the variables.
+
+```{r}
+mu_score <- mean(train$Score)
+mu_score 
+
+first_rmse <- RMSE(test$Score, mu_score)
+first_rmse 
+```
+```{r RMSE1,echo=FALSE}
+RMSE_Result <- data.frame(model="Baseline Model", RMSE=first_rmse)
+RMSE_Result %>% knitr::kable()
+```
+
+This model was used as base and RMSE will be tried to improve.  
+
+The second model included the predicting the alcohol, volatile acidity and sulphates effect on the score.
+
+```{r}
+alcohol_avg <- train %>%
+  group_by(alcohol) %>%
+  summarise(b_a = mean(Score - mu_score))
+
+acidity_avg <- train %>% 
+  left_join(alcohol_avg, by='alcohol') %>%
+  group_by(volatile.acidity) %>%
+  summarise(b_v = mean(Score - mu_score - b_a))
+
+sulphates_avg <- train %>% 
+  left_join(alcohol_avg, by='alcohol') %>%
+  left_join(acidity_avg, by='volatile.acidity') %>%
+  group_by(sulphates) %>%
+  summarise(b_s = mean(Score - mu_score - b_a - b_v))
+
+predicted_score <- test %>% 
+  left_join(alcohol_avg, by='alcohol') %>%
+  left_join(acidity_avg, by='volatile.acidity') %>%
+  left_join(sulphates_avg, by='sulphates') %>%
+  mutate(pred = mu_score + b_a + b_v + b_s) %>%
+  pull(pred)
+
+Combined_effect <-RMSE(predicted_score, test$Score)
+Combined_effect
+
+```
+```{r RMSE2,echo=FALSE}
+RMSE_Result <- bind_rows(RMSE_Result,
+                          data_frame(model="Combined effect Model",  
+                                     RMSE = Combined_effect))
+RMSE_Result %>% knitr::kable()
+```
+
+The third model was the regularized model. For this model we chose lambda (tuning parameter) for alcohol, volatile acidity and sulphates effect in order to improve the RMSE.
+
+```{r}
+lambdas <- seq(0, 10, 0.5)
+
+rmses <- sapply(lambdas, function(l){
+  mu_score <- mean(train$Score)
+  
+  b_a <- train %>% 
+    group_by(alcohol) %>%
+    summarise(b_a = sum(Score - mu_score)/(n()+l))
+  
+  b_v <- train %>% 
+    left_join(b_a, by="alcohol") %>%
+    group_by(volatile.acidity) %>%
+    summarise(b_v = sum(Score - b_a - mu_score)/(n()+l))
+  
+  b_s <- train %>% 
+    left_join(b_a, by="alcohol") %>%
+    left_join(b_v, by="volatile.acidity") %>%
+    group_by(sulphates) %>%
+    summarise(b_s = sum(Score - b_a - b_v - mu_score)/(n()+l))
+  
+  predicted_score <- test %>% 
+    left_join(b_a, by = "alcohol") %>%
+    left_join(b_v, by = "volatile.acidity") %>%
+    left_join(b_s, by = "sulphates") %>%
+    mutate(pred = mu_score + b_a + b_v + b_s) %>%
+    pull(pred)
+  
+  return(RMSE(predicted_score, test$Score))
+})
+```
+The distribution of lambdas is the following:
+```{r lambdas, echo=FALSE, fig.align = 'center'}
+qplot(lambdas, rmses)  
+```
+By using following code, the optimal lambda was chosen:
+```{r}
+lambda1 <- lambdas[which.min(rmses)]
+lambda1
+```
+Once the lambda was selected, it was added to the code in order to see if RMSE has improved.
+```{r}
+alcohol_avg <- train %>%
+  group_by(alcohol) %>%
+  summarise(b_a = sum(Score - mu_score)/(n()+lambda1), n_a = n())
+
+acidity_avg <- train %>% 
+  left_join(alcohol_avg, by='alcohol') %>%
+  group_by(volatile.acidity) %>%
+  summarise(b_v = sum(Score - mu_score - b_a)/(n()+lambda1), n_v = n())
+
+sulphates_avg <- train %>% 
+  left_join(alcohol_avg, by='alcohol') %>%
+  left_join(acidity_avg, by='volatile.acidity') %>%
+  group_by(sulphates) %>%
+  summarise(b_s = sum(Score - mu_score - b_a - b_v)/(n()+lambda1), n_s = n())
+
+predicted_score <- test %>% 
+  left_join(alcohol_avg, by = "alcohol") %>%
+  left_join(acidity_avg, by = "volatile.acidity") %>%
+  left_join(sulphates_avg, by = "sulphates") %>%
+  mutate(pred = mu_score + b_a + b_v + b_s) %>%
+  pull(pred)
+
+reg_m_u_effect <- RMSE(predicted_score, test$Score)
+```
+```{r RMSE3,echo=FALSE}
+RMSE_Result <- bind_rows(RMSE_Result,
+                          data_frame(model="Reg. Model 3 parameters effect",  
+                                     RMSE = reg_m_u_effect))
+RMSE_Result %>% knitr::kable()
+```
+The RMSE improved from 0.7941076 to 0.6804121 with the regularized model. 
+
+For this analysis/model we used only three variables. Therefore, another approach might help us to improve the RMSE even more. 
+
+*2.2 Random Forest Model*
+
+The second approach used is the random forest model. This model helps to improve prediction performance and is based on creating multiple decision trees to improve prediction.
+
+As we are working with a regression model and not a classification model, no accuracy can be predicted. 
+The prediction will be made for RMSE (Root Mean Squared Error) and MAE (Mean Absolute Error).
+
+The first thing we do is define the control measurements and evaluate the model with a grid search of 10 folder
+
+```{r}
+trainControl <- trainControl(method = "cv",
+                          number = 10,
+                          search = "grid")
+```
+
+A first formula was created to implement the random forest (rf) model:
+```{r}
+rf1 <- train(Score~., train, method = "rf", trControl = trainControl)
+
+print(rf1)
+```
+
+This results i already better than what we obtained with the recommendation system model.
+
+Let's try to optimize this further. To do so, we optimize our model by tuning the grid and search for a better mtry between 1 and 12.
+
+```{r}
+set.seed(1234)
+tuneGrid <- expand.grid(.mtry = c(1: 12))
+
+rf2 <- train(Score~., train, method = "rf", trControl = trainControl, tuneGrid =tuneGrid, importance = TRUE)
+
+print(rf2)
+```
+
+The results show the best mtry for the best RMSE.
+
+Now we can evaluate the model against our test data:
+```{r}
+prediction <-predict(rf2, test)
+
+RF_Model<- RMSE(prediction, test$Score)
+
+```
+```{r RMSE4,echo=FALSE}
+
+RMSE_Result <- bind_rows(RMSE_Result,
+                         data_frame(model="Random Forest Model",  
+                                    RMSE = RF_Model))
+RMSE_Result %>% knitr::kable()
+```
+
+The RMSE obtained for the random forest model is 0.5898854. 
+
+#*3. Conclusions*
+
+In general, we could see that using different models, the RMSE was improved: 
+``` {r RMSE5, echo=FALSE}
+RMSE_Result %>% knitr::kable()
+```
+
+The random forest model showed significantly improvement in the RMSE.
+
+There is still room for more improvement in both models. 
+For the first model (recommendation system), more variables could be added in order to make the model more precise. 
+For the random forest model, there is the possibility of not only improving the mtry, but also the maxnodes and the ntrees (which were not optimize for this exercise). This could be made in a future project. 
+
+What would be also interesting, is to have more information of the data, ex. what kind of grapes are used to produce the wine or if they come from a specific region in order to predict more specifically on the origin of the wine and not only the quality. 
+
+# *4. References* 
+
+P. Cortez, A. Cerdeira, F. Almeida, T. Matos and J. Reis. Modeling wine preferences by data mining from physicochemical properties.
+In Decision Support Systems, Elsevier, 47(4):547-553. ISSN: 0167-9236.
+
+https://rafalab.github.io/dsbook/
+
+https://www.guru99.com/r-random-forest-tutorial.html
